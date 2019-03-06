@@ -1,0 +1,138 @@
+android GPU渲染 60帧一秒 没帧16MS。符合每一帧16MS的刷新率的应用，用户是感受不到卡顿的。
+
+卡顿的表现：从用户角度说，App操作起来缓慢，响应不及时，列表滑动一顿一顿的，动画刷新不流畅等等一些直观感受。从系统角度来说，屏幕刷新的帧率不稳定，
+无法保证每秒绘制60帧，也就是说有掉帧的情况发生。就是一帧的渲染时间超过了16MS，人眼就能感知到卡顿的情况发生。
+
+对于开发过程，出现卡顿的主要原因是主线程做了一些不该做的事，或者主线程做不了事情了。
+
+常见的卡顿发生情况：
+
+
+
+
+布局渲染（解析、测量、布局、渲染）
+布局渲染优化 两个方面 
+1.优化VIEW 的measure layout draw，特别是自定义VIEW 的优化，提升自定义的性能。减少重复背景的使用，减少alpha的使用
+
+
+
+2.布局的嵌套，尽量使用RelativeLayout 或者最新的约束布局来构建界面，减少布局VIEW的过度绘制，可以使用手机的开发者功能选项过度绘制功能开启
+过度绘制
+
+去除不必要的背景色：
+
+(1) 设置窗口背景色为通用背景色，去除根布局背景色
+
+(2) 若页面背景色与通用背景色不一致，在页面渲染完成后移除窗口背景色
+
+(3) 去除和列表背景色相同的Item背景色
+
+3.include viewstub merge 要正确的使用，优化布局
+布局视图树扁平化：
+
+(1) 移除嵌套布局
+
+(2) 使用merge、include标签
+
+(3) 使用性能消耗更小布局（ConstraintLayout）
+
+
+
+动画执行
+
+Binder通信
+
+界面响应
+
+网络数据解析，JSON XML解析全部放在工作现场中
+
+主线程主要是做以上四个方面的工作，
+如果在主线程做一些耗时操作（网络请求、IO读写等），
+或者被其他线程挂起（GC），那么页面刷新无法在16ms内完成，就会出现掉帧的情况。
+
+掉帧检测
+主线程的通知使用主要是通过android的主线程Handler机制，通过主线程的LOOP 循环遍历主线程中的MESSAGE 来更新主线程中的事件
+如果在这个过程中有地方卡住或者费事过长那么就会出现卡顿的情况，因为LOOP机制可以说是串行的，消息是排列的一个个来一个个发
+检查LOOP的单个MESSAGE的执行时间可以设置替换默认的loop的Log类来打印出每个MESSAGE的执行时间
+Looper.getMainLooper().setMessageLogging(new Printer() {
+         
+   private static final String START = ">>>>> Dispatching";
+          
+  private static final String END = "<<<<< Finished";
+
+           
+ @Override
+            
+public void println(String x) {
+                
+if (x.startsWith(START)) 
+{
+                  
+  UiBlockLogMonitor.getInstance().startMonitor();
+    
+            }
+                
+if (x.startsWith(END)) {
+             
+       UiBlockLogMonitor.getInstance().stopMonitor();
+    
+            }
+          
+  }
+      
+  });
+
+  
+  Choreographer.FrameCallback
+Choreographer官方说明（https://developer.android.com/reference/android/view/Choreographer.html）
+
+Choreographer 编舞者，协调动画、输入和绘图的时间（api >= 16）。
+
+Choreographer从显示子系统接收定时脉冲（如垂直同步），然后安排下一帧的渲染工作。
+在开发中，我们并不直接使用Choreographer，当我们想要检测是否有丢帧发生时，可以利用Choreographer.FrameCallback回调的方式，获取每一帧开始绘制的时间，通过计算两帧之间的时间差，如果大于16ms，说明发生了丢帧。
+
+//为Choreographer设置一个回调，当一帧开始渲染时触发。
+Choreographer.getInstance().postFrameCallback(new Choreographer.FrameCallback() {
+            long lastFrameTimeNanos = 0;
+            long currentFrameTimeNanos = 0;
+
+            @Override
+            public void doFrame(long frameTimeNanos) {
+                if (lastFrameTimeNanos == 0) {
+                    lastFrameTimeNanos = frameTimeNanos;
+                }
+                currentFrameTimeNanos = frameTimeNanos;
+                long diffMs = TimeUnit.MILLISECONDS.convert(currentFrameTimeNanos - lastFrameTimeNanos, TimeUnit.NANOSECONDS);
+                lastFrameTimeNanos = currentFrameTimeNanos;
+                if (diffMs == 0) {
+                    diffMs = (long) 16.7;
+                }
+
+                if (isShowFPS) {
+                    long current = System.currentTimeMillis();
+                    if (current - mLastFPSRefreshTs > refreshInterval) {
+                        int fps = (int) (1000 / diffMs);
+                        refreshFPS(fps);
+                        mLastFPSRefreshTs = current;
+                    }
+                }
+
+                if (diffMs > 16.7f) {
+                    long droppedCount = (long) (diffMs / 16.7f);
+                    if (droppedCount > 1) {
+                        System.out.println("掉帧数 : " + droppedCount);
+                    }
+                }
+
+                if (UiBlockLogMonitor.getInstance().isMonitor()) {
+                    UiBlockLogMonitor.getInstance().stopMonitor();
+                }
+
+                if (isDetectContinue) {
+                    UiBlockLogMonitor.getInstance().startMonitor();
+                    Choreographer.getInstance().postFrameCallback(this);
+                }
+            }
+        });
+
+

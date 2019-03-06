@@ -1,0 +1,5 @@
+1.android 自带 traceview
+https://www.jianshu.com/p/7e9ca2c73c97  新版本android studio 使用traceview来记录
+
+2.android Systrace 工具
+https://mp.weixin.qq.com/s?__biz=MzU4MTIzMjM3MA==&mid=2247483958&idx=1&sn=a52a92a5416bed04f525c7bd2167580f&chksm=fd4bf1abca3c78bde8b72a38a2c0263591f209b0a0740dc6f31fa085e91ff8b83682dd3458c4&scene=21#wechat_redirect
